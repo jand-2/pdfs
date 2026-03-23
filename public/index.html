@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex PDF Canvas</title>
+    <meta name="theme-color" content="#171b20" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid"></div>
+    <div class="bg-glow"></div>
+    <main class="app-shell">
+      <section id="workspace-grid" class="workspace-grid">
+        <button id="left-pane-edge-toggle" class="pane-edge-toggle pane-edge-toggle-left" type="button" hidden>Show Library</button>
+        <button id="right-pane-edge-toggle" class="pane-edge-toggle pane-edge-toggle-right" type="button" hidden>Show Tools</button>
+
+        <aside id="left-pane" class="side-pane left-pane panel">
+          <section class="left-pane-account">
+            <div class="module-head">
+              <h2>Account</h2>
+            </div>
+            <p id="account-status" class="status-pill">Checking account...</p>
+            <button id="login-btn" class="btn account-btn" type="button">Sign In</button>
+          </section>
+
+          <div class="pane-header">
+            <h2>Document Shelf</h2>
+            <button id="left-pane-toggle" class="pane-toggle-btn" type="button">Hide</button>
+          </div>
+          <div class="pane-stack">
+            <section class="module">
+              <div class="module-head">
+                <h2>Library</h2>
+              </div>
+              <form id="upload-form" class="stack gap-sm">
+                <input id="pdf-file" type="file" accept="application/pdf" required />
+                <button class="btn" type="submit">Upload PDF</button>
+              </form>
+              <p class="hint">Stored locally and removed on shutdown.</p>
+              <ul id="doc-list" class="doc-list"></ul>
+              <div class="workspace-doc-actions">
+                <button id="merge-btn" class="btn ghost" type="button">Merge Selected</button>
+                <button id="new-analysis-window" class="btn" type="button">New Analysis Window</button>
+              </div>
+            </section>
+
+            <section class="module">
+              <div class="module-head">
+                <h2>Exports</h2>
+              </div>
+              <ul id="workspace-files" class="workspace-files"></ul>
+            </section>
+          </div>
+        </aside>
+
+        <div id="left-pane-resizer" class="pane-resizer" data-pane-edge="left"></div>
+
+        <section class="canvas panel">
+          <div class="canvas-topbar">
+            <div class="canvas-topbar-copy">
+              <p id="canvas-doc-title" class="canvas-doc-title">No PDF selected</p>
+              <p id="canvas-doc-meta" class="canvas-doc-meta">Upload a PDF to start.</p>
+            </div>
+            <div class="viewer-toolbar">
+              <button id="undo-btn" class="viewer-btn" type="button" aria-label="Undo last edit" title="Undo last edit">Undo</button>
+              <button id="redo-btn" class="viewer-btn" type="button" aria-label="Redo last edit" title="Redo last edit">Redo</button>
+              <button id="zoom-out-btn" class="viewer-btn" type="button" aria-label="Zoom out">-</button>
+              <button id="zoom-fit-btn" class="viewer-btn" type="button">Fit</button>
+              <span id="zoom-level" class="viewer-readout">100%</span>
+              <button id="zoom-in-btn" class="viewer-btn" type="button" aria-label="Zoom in">+</button>
+              <div class="viewer-page-nav">
+                <button id="page-prev-btn" class="viewer-btn viewer-page-btn" type="button">Prev</button>
+                <span id="page-readout" class="viewer-page-readout">1 / 1</span>
+                <form id="page-jump-form" class="viewer-page-form">
+                  <input id="page-jump-input" class="viewer-page-input" type="number" min="1" value="1" inputmode="numeric" aria-label="Go to page" />
+                  <button class="viewer-btn viewer-page-go" type="submit">Go</button>
+                </form>
+                <button id="page-next-btn" class="viewer-btn viewer-page-btn" type="button">Next</button>
+              </div>
+              <button id="rotate-view-left" class="viewer-btn" type="button" aria-label="Rotate left">↺</button>
+              <button id="rotate-view-right" class="viewer-btn" type="button" aria-label="Rotate right">↻</button>
+              <a id="download-viewer" class="btn ghost disabled-link" href="#">Download</a>
+            </div>
+          </div>
+
+          <div id="pdf-stage" class="pdf-stage">
+            <div id="pdf-scroll" class="pdf-scroll">
+              <div id="pdf-viewer" class="pdf-viewer"></div>
+            </div>
+            <div id="placement-canvas-host" class="placement-canvas-host">
+              <canvas id="placement-canvas"></canvas>
+            </div>
+            <div id="pdf-empty" class="pdf-empty">
+              <div class="empty-card">
+                <p class="empty-kicker">Ready for a document</p>
+                <h2>Bring in a PDF and start working from the center stage.</h2>
+                <p>The left rail handles files and exports. The right rail handles page edits, annotations, signatures, and extraction.</p>
+              </div>
+            </div>
+            <div id="placement-layer" class="placement-layer">
+              <div id="placement-page-frame" class="placement-page-frame"></div>
+              <div id="placement-preview-box" class="placement-preview-box"></div>
+              <div class="placement-toolbar">
+                <p id="placement-hint" class="placement-hint">Click to place annotation.</p>
+                <button id="cancel-placement" class="btn ghost" type="button">Cancel Placement</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div id="right-pane-resizer" class="pane-resizer" data-pane-edge="right"></div>
+
+        <aside id="right-pane" class="side-pane right-pane panel">
+          <div class="pane-header">
+            <h2>Inspector</h2>
+            <button id="right-pane-toggle" class="pane-toggle-btn" type="button">Hide</button>
+          </div>
+          <div class="pane-stack">
+            <section id="edit-module" class="module">
+              <div class="module-head">
+                <h2>Page Tools</h2>
+              </div>
+              <p id="selected-doc-meta" class="status">No document selected.</p>
+              <div class="tool-ribbon" role="tablist" aria-label="Tool groups">
+                <button class="tool-ribbon-btn active" type="button" data-tool-panel-target="pages">Pages</button>
+                <button class="tool-ribbon-btn" type="button" data-tool-panel-target="forms">Forms</button>
+                <button class="tool-ribbon-btn" type="button" data-tool-panel-target="annotate">Annotate</button>
+                <button class="tool-ribbon-btn" type="button" data-tool-panel-target="sign">Sign</button>
+                <button class="tool-ribbon-btn" type="button" data-tool-panel-target="extract">Extract</button>
+              </div>
+              <div class="tool-panels">
+                <div class="tool-panel active" data-tool-panel-id="pages">
+                  <form id="rotate-form" class="op-form">
+                    <h3>Rotate</h3>
+                    <input name="pages" placeholder="Pages (1,3-5)" required />
+                    <select name="degrees">
+                      <option value="90">+90</option>
+                      <option value="180">180</option>
+                      <option value="270">+270</option>
+                      <option value="-90">-90</option>
+                    </select>
+                    <button class="btn" type="submit">Apply</button>
+                  </form>
+
+                  <form id="delete-pages-form" class="op-form">
+                    <h3>Delete Pages</h3>
+                    <input name="pages" placeholder="Pages to remove" required />
+                    <button class="btn" type="submit">Apply</button>
+                  </form>
+
+                  <form id="extract-pages-form" class="op-form">
+                    <h3>Extract Pages</h3>
+                    <input name="pages" placeholder="Pages to extract" required />
+                    <input name="filename" placeholder="New PDF name (optional)" />
+                    <button class="btn" type="submit">Create New PDF</button>
+                  </form>
+                </div>
+
+                <div class="tool-panel" data-tool-panel-id="forms" hidden>
+                  <form id="fill-form-fields-form" class="op-form">
+                    <h3>Fill Forms</h3>
+                    <p class="hint">Edit the PDF's embedded form fields here. Changes are written into the document and support undo.</p>
+                    <div id="form-fields-summary" class="form-fields-summary"></div>
+                    <div id="form-fields-list" class="form-fields-list"></div>
+                    <button id="fill-form-fields-submit" class="btn" type="submit">Apply Form Values</button>
+                  </form>
+                </div>
+
+                <div class="tool-panel" data-tool-panel-id="annotate" hidden>
+                  <form id="add-text-form" class="op-form">
+                    <h3>Add Text</h3>
+                    <textarea name="text" placeholder="Text to place" required></textarea>
+                    <div class="row">
+                      <input name="page" type="number" min="1" value="1" placeholder="Page" />
+                      <input name="fontSize" type="number" min="6" value="14" placeholder="Size" />
+                    </div>
+                    <div class="row">
+                      <select name="fontFamily">
+                        <option value="helvetica">Helvetica</option>
+                        <option value="times">Times</option>
+                        <option value="courier">Courier</option>
+                      </select>
+                      <input name="color" type="color" value="#111111" />
+                    </div>
+                    <div class="style-options">
+                      <label><input name="bold" type="checkbox" /> Bold</label>
+                      <label><input name="italic" type="checkbox" /> Italic</label>
+                      <label><input name="underline" type="checkbox" /> Underline</label>
+                    </div>
+                    <button class="btn" type="submit">Place Text On Canvas</button>
+                  </form>
+
+                  <form id="highlight-form" class="op-form">
+                    <h3>Add Highlight</h3>
+                    <div class="row">
+                      <input name="page" type="number" min="1" value="1" placeholder="Page" />
+                      <input name="color" type="color" value="#ffe16b" />
+                    </div>
+                    <label class="hint">Opacity
+                      <input name="opacity" type="range" min="0.1" max="1" step="0.05" value="0.35" />
+                    </label>
+                    <button class="btn" type="submit">Draw Highlight On Canvas</button>
+                  </form>
+                </div>
+
+                <div class="tool-panel" data-tool-panel-id="sign" hidden>
+                  <form id="signature-form" class="op-form">
+                    <h3>Electronic Signature</h3>
+                    <p class="hint">Choose Draw or Type, then click Start Placement and click the PDF where the signature should go.</p>
+                    <div class="signature-appearance-picker" role="radiogroup" aria-label="Visible signature appearance">
+                      <label class="signature-appearance-option">
+                        <input name="appearanceMode" type="radio" value="draw" checked />
+                        <span>Draw</span>
+                      </label>
+                      <label class="signature-appearance-option">
+                        <input name="appearanceMode" type="radio" value="type" />
+                        <span>Type</span>
+                      </label>
+                    </div>
+                    <p id="signature-mode-note" class="signature-mode-note"></p>
+                    <div id="signature-draw-section" class="signature-appearance-section">
+                      <canvas id="signature-pad" width="720" height="240" aria-label="Draw signature"></canvas>
+                      <div class="signature-pad-actions">
+                        <button id="clear-signature" class="btn ghost" type="button">Clear Drawing</button>
+                      </div>
+                      <p class="hint">This places a handwritten electronic signature directly on the page.</p>
+                    </div>
+                    <div id="signature-type-section" class="signature-appearance-section" hidden>
+                      <label class="field-label" for="signature-appearance-text">Typed Signature Name</label>
+                      <input id="signature-appearance-text" name="appearanceText" placeholder="Type the name to show in cursive" />
+                      <p class="hint">We'll render this as a cursive electronic signature.</p>
+                    </div>
+                    <div id="signature-preview-note" class="signature-preview-note"></div>
+                    <input name="page" type="number" min="1" value="1" placeholder="Page" />
+                    <p class="hint">After you click the button below, click once on the PDF page to place the signature.</p>
+                    <div id="signature-summary" class="signature-summary"></div>
+                    <button id="signature-start-btn" class="btn" type="submit">Start Placement With Drawn Signature</button>
+                  </form>
+                </div>
+
+                <div class="tool-panel" data-tool-panel-id="extract" hidden>
+                  <form id="extract-text-form" class="op-form">
+                    <h3>Extract Text</h3>
+                    <div class="row wrap">
+                      <input id="extract-pages" placeholder="Optional pages (1-2)" />
+                      <button class="btn" type="submit">Extract</button>
+                    </div>
+                    <textarea id="extracted-text" placeholder="Extracted text"></textarea>
+                  </form>
+                </div>
+              </div>
+            </section>
+          </div>
+        </aside>
+
+        <div id="analysis-windows" class="analysis-windows"></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
