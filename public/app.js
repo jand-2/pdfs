@@ -14,6 +14,8 @@ const state = {
   activeToolPanel: "pages",
   loginPollTimer: null,
   account: null,
+  codexAvailable: true,
+  codexUnavailableReason: "",
   layout: {
     leftCollapsed: false,
     rightCollapsed: false,
@@ -946,7 +948,18 @@ function cleanupStateAgainstDocs() {
 }
 
 function renderAccountStatus(account) {
+  state.codexAvailable = account?.available !== false;
+  state.codexUnavailableReason = account?.reason ? String(account.reason) : "";
   state.account = account?.account ?? null;
+
+  if (!state.codexAvailable) {
+    el.accountStatus.textContent = "Cloud deploy: local Codex unavailable";
+    el.loginBtn.textContent = "Unavailable";
+    el.loginBtn.disabled = true;
+    return;
+  }
+
+  el.loginBtn.disabled = false;
 
   if (!state.account) {
     el.accountStatus.textContent = "Not signed in";
@@ -1319,7 +1332,7 @@ function renderDocContext() {
   el.selectedDocMeta.textContent = [doc.filename, `${doc.pageCount} pages`, formatBytes(doc.sizeBytes), signatureLabel].filter(Boolean).join(" · ");
   el.canvasDocTitle.textContent = doc.filename;
   el.canvasDocMeta.textContent = [`${doc.pageCount} pages`, formatBytes(doc.sizeBytes), signatureLabel].filter(Boolean).join(" · ");
-  el.newAnalysisWindow.disabled = false;
+  el.newAnalysisWindow.disabled = !state.codexAvailable;
   el.pdfEmpty.classList.add("hidden");
   renderViewerControls();
   renderFormsPanel();
@@ -1614,6 +1627,11 @@ function startLoginPolling(loginId) {
 }
 
 function createAnalysisWindow() {
+  if (!state.codexAvailable) {
+    showToast(state.codexUnavailableReason || "Codex analysis is unavailable in this deployment.");
+    return;
+  }
+
   const doc = selectedDoc();
   if (!doc) {
     showToast("Select a document first.");
@@ -2115,6 +2133,11 @@ function withSelectedDoc(action) {
 
 el.loginBtn.addEventListener("click", async () => {
   try {
+    if (!state.codexAvailable) {
+      showToast(state.codexUnavailableReason || "Codex sign-in is unavailable in this deployment.");
+      return;
+    }
+
     if (state.account) {
       clearLoginPoll();
       await api("/api/codex/logout", { method: "POST" });

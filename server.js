@@ -10,6 +10,8 @@ const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT ?? 3210);
 const MAX_UPLOAD_SIZE_BYTES = 80 * 1024 * 1024;
+const IS_VERCEL = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+const CODEX_CLOUD_MESSAGE = "Codex authentication and analysis are only available in the local desktop or self-hosted deployment.";
 
 const app = express();
 const upload = multer({
@@ -21,6 +23,8 @@ const upload = multer({
 
 const pdfStore = new PdfStore();
 const codex = new CodexSupervisor();
+let pdfStoreInitPromise = null;
+let codexStartPromise = null;
 
 const MIME_BY_EXTENSION = new Map([
   [".md", "text/markdown"],
@@ -113,22 +117,86 @@ function parseInlineDownloads(output) {
   };
 }
 
+function createHttpError(message, statusCode = 500) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+async function ensurePdfStoreReady() {
+  if (!pdfStoreInitPromise) {
+    pdfStoreInitPromise = pdfStore.init().catch((error) => {
+      pdfStoreInitPromise = null;
+      throw error;
+    });
+  }
+  await pdfStoreInitPromise;
+}
+
+async function ensureCodexReady() {
+  if (IS_VERCEL) {
+    throw createHttpError(CODEX_CLOUD_MESSAGE, 501);
+  }
+
+  if (!codexStartPromise) {
+    codexStartPromise = codex.start().catch((error) => {
+      codexStartPromise = null;
+      throw error;
+    });
+  }
+
+  await codexStartPromise;
+}
+
+function codexUnavailablePayload() {
+  return {
+    available: false,
+    deploymentMode: IS_VERCEL ? "cloud" : "local",
+    reason: CODEX_CLOUD_MESSAGE
+  };
+}
+
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use("/vendor/pdfjs", express.static(path.join(__dirname, "node_modules", "pdfjs-dist")));
 app.use(express.static(path.join(__dirname, "public")));
+app.use(async (req, _res, next) => {
+  if (!req.path.startsWith("/api/docs")) {
+    next();
+    return;
+  }
 
-app.get("/api/health", (_req, res) => {
+  try {
+    await ensurePdfStoreReady();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/health", asyncHandler(async (_req, res) => {
+  await ensurePdfStoreReady();
   res.json({
     ok: true,
+    deploymentMode: IS_VERCEL ? "vercel" : "local",
+    codexAvailable: !IS_VERCEL,
     codexConnected: codex.isConnected(),
     loadedDocs: pdfStore.listDocs().length
   });
-});
+}));
 
 app.get(
   "/api/codex/account",
   asyncHandler(async (_req, res) => {
+    if (IS_VERCEL) {
+      res.json({
+        account: null,
+        ...codexUnavailablePayload()
+      });
+      return;
+    }
+
+    await ensureCodexReady();
     const account = await codex.getAccount();
     res.json(account);
   })
@@ -137,6 +205,15 @@ app.get(
 app.get(
   "/api/codex/models",
   asyncHandler(async (_req, res) => {
+    if (IS_VERCEL) {
+      res.json({
+        data: [],
+        ...codexUnavailablePayload()
+      });
+      return;
+    }
+
+    await ensureCodexReady();
     const models = await codex.listModels();
     res.json(models);
   })
@@ -145,6 +222,7 @@ app.get(
 app.post(
   "/api/codex/login/start",
   asyncHandler(async (_req, res) => {
+    await ensureCodexReady();
     const login = await codex.startChatgptLogin();
     res.json(login);
   })
@@ -153,6 +231,15 @@ app.post(
 app.post(
   "/api/codex/logout",
   asyncHandler(async (_req, res) => {
+    if (IS_VERCEL) {
+      res.json({
+        ok: true,
+        ...codexUnavailablePayload()
+      });
+      return;
+    }
+
+    await ensureCodexReady();
     await codex.logout();
     res.json({ ok: true });
   })
@@ -161,10 +248,23 @@ app.post(
 app.get(
   "/api/codex/login/status/:loginId",
   asyncHandler(async (req, res) => {
+    if (IS_VERCEL) {
+      res.json({
+        status: {
+          success: false,
+          pending: false,
+          error: CODEX_CLOUD_MESSAGE
+        },
+        ...codexUnavailablePayload()
+      });
+      return;
+    }
+
     const { loginId } = req.params;
     const status = codex.getLoginStatus(loginId);
 
     if (status?.success) {
+      await ensureCodexReady();
       const account = await codex.getAccount();
       res.json({ status, account });
       return;
@@ -476,6 +576,9 @@ app.post(
 app.post(
   "/api/codex/analyze",
   asyncHandler(async (req, res) => {
+    await ensurePdfStoreReady();
+    await ensureCodexReady();
+
     const docId = String(req.body?.docId ?? "").trim();
     const userPrompt = String(req.body?.prompt ?? "").trim();
     const requestedThreadId = req.body?.threadId ? String(req.body.threadId).trim() : null;
@@ -545,7 +648,8 @@ app.get("*", (req, res, next) => {
 
 app.use((error, _req, res, _next) => {
   const message = error?.message || "Unexpected server error";
-  const statusCode = message.toLowerCase().includes("missing") || message.toLowerCase().includes("invalid") ? 400 : 500;
+  const statusCode = Number(error?.statusCode)
+    || (message.toLowerCase().includes("missing") || message.toLowerCase().includes("invalid") ? 400 : 500);
 
   res.status(statusCode).json({
     ok: false,
@@ -556,8 +660,8 @@ app.use((error, _req, res, _next) => {
 let server = null;
 
 async function bootstrap() {
-  await pdfStore.init();
-  await codex.start();
+  await ensurePdfStoreReady();
+  await ensureCodexReady();
 
   server = app.listen(PORT, () => {
     console.log(`codex-pdf-local-app listening on http://localhost:${PORT}`);
@@ -578,10 +682,16 @@ const shutdown = async () => {
   process.exit(0);
 };
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+const isDirectRun = process.argv[1] ? path.resolve(process.argv[1]) === __filename : false;
 
-bootstrap().catch((error) => {
-  console.error(`Failed to start app: ${error.message}`);
-  process.exit(1);
-});
+export default app;
+
+if (isDirectRun) {
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  bootstrap().catch((error) => {
+    console.error(`Failed to start app: ${error.message}`);
+    process.exit(1);
+  });
+}
