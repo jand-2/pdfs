@@ -16,6 +16,8 @@ const state = {
   account: null,
   codexAvailable: true,
   codexUnavailableReason: "",
+  pdfOpsAvailable: true,
+  pdfOpsUnavailableReason: "",
   layout: {
     leftCollapsed: false,
     rightCollapsed: false,
@@ -51,6 +53,7 @@ const el = {
   loginBtn: document.getElementById("login-btn"),
   uploadForm: document.getElementById("upload-form"),
   pdfFileInput: document.getElementById("pdf-file"),
+  libraryHint: document.getElementById("library-hint"),
   leftPane: document.getElementById("left-pane"),
   rightPane: document.getElementById("right-pane"),
   leftPaneToggle: document.getElementById("left-pane-toggle"),
@@ -978,6 +981,26 @@ function renderAccountStatus(account) {
   el.loginBtn.textContent = "Sign Out";
 }
 
+function renderCapabilityState() {
+  if (el.libraryHint instanceof HTMLElement) {
+    el.libraryHint.textContent = state.pdfOpsAvailable
+      ? "Stored locally and removed on shutdown."
+      : (state.pdfOpsUnavailableReason || "PDF tools are unavailable in this deployment.");
+  }
+
+  if (el.uploadForm instanceof HTMLFormElement) {
+    for (const control of [...el.uploadForm.elements]) {
+      if ("disabled" in control) {
+        control.disabled = !state.pdfOpsAvailable;
+      }
+    }
+  }
+
+  if (el.mergeBtn instanceof HTMLButtonElement) {
+    el.mergeBtn.disabled = !state.pdfOpsAvailable || state.mergeSelection.size < 2;
+  }
+}
+
 function describeFormFieldType(field) {
   switch (field?.type) {
     case "textarea":
@@ -1254,11 +1277,12 @@ function renderEditLockState() {
 
 function renderDocs() {
   el.docList.innerHTML = "";
+  renderCapabilityState();
 
   if (!state.docs.length) {
     const empty = document.createElement("li");
     empty.className = "empty-text";
-    empty.textContent = "No PDFs uploaded yet.";
+    empty.textContent = state.pdfOpsAvailable ? "No PDFs uploaded yet." : "PDF tools unavailable in this deployment.";
     el.docList.append(empty);
     return;
   }
@@ -1304,6 +1328,10 @@ function renderDocs() {
 
     item.append(top, title, meta);
     el.docList.append(item);
+  }
+
+  if (el.mergeBtn instanceof HTMLButtonElement) {
+    el.mergeBtn.disabled = !state.pdfOpsAvailable || state.mergeSelection.size < 2;
   }
 }
 
@@ -1558,6 +1586,14 @@ async function loadModels() {
     state.models = [];
     state.defaultModel = null;
   }
+}
+
+async function loadHealth() {
+  const payload = await api("/api/health");
+  state.pdfOpsAvailable = payload?.pdfOpsAvailable !== false;
+  state.pdfOpsUnavailableReason = payload?.pdfOpsReason ? String(payload.pdfOpsReason) : "";
+  renderCapabilityState();
+  return payload;
 }
 
 async function loadWorkspaceFiles() {
@@ -2162,6 +2198,11 @@ el.loginBtn.addEventListener("click", async () => {
 
 el.uploadForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!state.pdfOpsAvailable) {
+    showToast(state.pdfOpsUnavailableReason || "PDF tools are unavailable in this deployment.");
+    return;
+  }
+
   const file = el.pdfFileInput.files?.[0];
   if (!file) {
     showToast("Pick a PDF first.");
@@ -2202,6 +2243,8 @@ el.docList.addEventListener("change", (event) => {
   } else {
     state.mergeSelection.delete(mergeId);
   }
+
+  renderCapabilityState();
 });
 
 el.docList.addEventListener("click", async (event) => {
@@ -2230,6 +2273,11 @@ el.docList.addEventListener("click", async (event) => {
 });
 
 el.mergeBtn.addEventListener("click", async () => {
+  if (!state.pdfOpsAvailable) {
+    showToast(state.pdfOpsUnavailableReason || "PDF tools are unavailable in this deployment.");
+    return;
+  }
+
   const docIds = [...state.mergeSelection];
   if (docIds.length < 2) {
     showToast("Select at least two docs to merge.");
@@ -2956,6 +3004,7 @@ document.addEventListener("mouseup", () => {
   renderFormsPanel();
   renderEditLockState();
   renderSignaturePanel();
+  renderCapabilityState();
 
   if ("ResizeObserver" in window) {
     const resizeObserver = new ResizeObserver(() => {
@@ -2967,7 +3016,7 @@ document.addEventListener("mouseup", () => {
   }
 
   try {
-    await Promise.all([loadAccount(), loadModels(), loadDocs(false)]);
+    await Promise.all([loadHealth(), loadAccount(), loadModels(), loadDocs(false)]);
     renderAnalysisWindows();
   } catch (error) {
     showToast(error.message, 5000);

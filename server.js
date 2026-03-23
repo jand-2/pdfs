@@ -1,5 +1,6 @@
 import express from "express";
 import multer from "multer";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CodexSupervisor } from "./lib/codexSupervisor.js";
@@ -12,6 +13,7 @@ const PORT = Number(process.env.PORT ?? 3210);
 const MAX_UPLOAD_SIZE_BYTES = 80 * 1024 * 1024;
 const IS_VERCEL = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
 const CODEX_CLOUD_MESSAGE = "Codex authentication and analysis are only available in the local desktop or self-hosted deployment.";
+const PDF_RUNTIME_MESSAGE = "PDF editing is unavailable in this deployment because python3 is not installed in the Vercel runtime.";
 
 const app = express();
 const upload = multer({
@@ -25,6 +27,7 @@ const pdfStore = new PdfStore();
 const codex = new CodexSupervisor();
 let pdfStoreInitPromise = null;
 let codexStartPromise = null;
+let pdfRuntimeStatusPromise = null;
 
 const MIME_BY_EXTENSION = new Map([
   [".md", "text/markdown"],
@@ -156,6 +159,29 @@ function codexUnavailablePayload() {
   };
 }
 
+async function getPdfRuntimeStatus() {
+  if (!pdfRuntimeStatusPromise) {
+    pdfRuntimeStatusPromise = new Promise((resolve) => {
+      execFile("python3", ["--version"], { timeout: 5_000 }, (error) => {
+        if (error) {
+          resolve({
+            available: false,
+            reason: error.code === "ENOENT" ? PDF_RUNTIME_MESSAGE : `PDF runtime check failed: ${error.message}`
+          });
+          return;
+        }
+
+        resolve({
+          available: true,
+          reason: ""
+        });
+      });
+    });
+  }
+
+  return pdfRuntimeStatusPromise;
+}
+
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use("/vendor/pdfjs", express.static(path.join(__dirname, "node_modules", "pdfjs-dist")));
@@ -176,10 +202,13 @@ app.use(async (req, _res, next) => {
 
 app.get("/api/health", asyncHandler(async (_req, res) => {
   await ensurePdfStoreReady();
+  const pdfRuntime = await getPdfRuntimeStatus();
   res.json({
     ok: true,
     deploymentMode: IS_VERCEL ? "vercel" : "local",
     codexAvailable: !IS_VERCEL,
+    pdfOpsAvailable: pdfRuntime.available,
+    pdfOpsReason: pdfRuntime.reason,
     codexConnected: codex.isConnected(),
     loadedDocs: pdfStore.listDocs().length
   });
